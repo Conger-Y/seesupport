@@ -152,6 +152,7 @@
   <canvas id="verlauf" width="320" height="42" aria-label="Verlauf der Vibration"></canvas>
   <span class="zaehler" id="liveStatus">Sensor nicht aktiv</span>
 </footer>
+<div class="hinweis" id="diagnose" hidden></div>
 <div class="hinweis" id="hinweis">
   Die Ampel wird im Browser aus den Sensorwerten berechnet &ndash; mit der Regel aus dem Modell:
   Kühleffizienz unter 23,6 % = Rot, unter 37,2 % = Gelb, darüber = grün.
@@ -314,6 +315,17 @@ function liveBewerten(wert) {
 
 function aufBewegung(e) {
   const a = e.acceleration && e.acceleration.x !== null ? e.acceleration : e.accelerationIncludingGravity;
+  LIVE.rohEreignisse = (LIVE.rohEreignisse || 0) + 1;
+  // Diagnose: zeigt direkt auf dem Handy, was der Sensor liefert
+  if (LIVE.rohEreignisse % 10 === 1) {
+    const quelle = (e.acceleration && e.acceleration.x !== null) ? "acceleration"
+                 : (e.accelerationIncludingGravity ? "inklusive Schwerkraft" : "keine");
+    el("diagnose").textContent =
+      "Diagnose - Ereignisse: " + LIVE.rohEreignisse +
+      " | Quelle: " + quelle +
+      " | x/y/z: " + (a ? [a.x, a.y, a.z].map(w => (w === null || w === undefined) ? "null" : w.toFixed(2)).join(" / ") : "null") +
+      " | brauchbar: " + LIVE.bewegung;
+  }
   if (!a) return;
   const betrag = Math.sqrt((a.x || 0) ** 2 + (a.y || 0) ** 2 + (a.z || 0) ** 2);
   LIVE.werte.push(betrag);
@@ -347,6 +359,10 @@ async function messungStarten() {
 
     window.addEventListener("devicemotion", aufBewegung);
     LIVE.an = true; LIVE.rateStart = performance.now(); LIVE.ereignisse = 0;
+    LIVE.rohEreignisse = 0; LIVE.bewegung = 0;
+    el("diagnose").hidden = false;
+    el("diagnose").textContent = "Diagnose - warte auf erstes Sensorereignis ... (Protokoll: " +
+      location.protocol + ", DeviceMotionEvent: " + (typeof DeviceMotionEvent) + ")";
     el("btnMessen").textContent = "Messung stoppen";
     el("btnBasis").disabled = false;
     el("liveStatus").textContent = "Sensor aktiv";
