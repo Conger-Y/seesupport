@@ -60,6 +60,14 @@
   .zaehler { font-size:13px; color:var(--grau); font-variant-numeric:tabular-nums; }
   .hinweis { padding:9px 20px; font-size:13px; background:#14283d; color:var(--grau);
              border-top:1px solid #22405f; }
+  .modus { display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+           padding:11px 20px; background:#102033; border-top:1px solid #22405f; }
+  .modus button { font-size:13px; padding:7px 14px; }
+  .modus button.aktiv { background:#1b3a5f; border-color:#3d6a98; color:#fff; font-weight:600; }
+  .modus-info { font-size:13px; color:var(--grau); }
+  #verlauf { background:#0b1a29; border:1px solid #22405f; border-radius:6px; }
+  /* muss nach den display-Regeln stehen: sonst gewinnt display:flex gegen hidden */
+  [hidden] { display:none !important; }
 </style>
 </head>
 <body>
@@ -93,11 +101,17 @@
           <p class="status-text" id="statusText">Auf Start drücken</p>
         </div>
       </div>
-      <div class="karte werte">
+      <div class="karte werte" id="werteDemo">
         <span>Kühleffizienz</span><b id="wCE">&ndash;</b>
         <span>Kühlleistung</span><b id="wCP">&ndash;</b>
         <span>Temperatur</span><b id="wTS">&ndash;</b>
         <span>Vibration</span><b id="wVS">&ndash;</b>
+      </div>
+      <div class="karte werte" id="werteLive" hidden>
+        <span>Vibration (RMS)</span><b id="lRMS">&ndash;</b>
+        <span>Referenz normal</span><b id="lBasis">nicht gelernt</b>
+        <span>Verhältnis</span><b id="lFaktor">&ndash;</b>
+        <span>Messrate</span><b id="lRate">&ndash;</b>
       </div>
     </div>
 
@@ -115,6 +129,12 @@
   </div>
 </div>
 
+<div class="modus">
+  <button id="btnModusDemo" class="aktiv">Demo &middot; Datensatz</button>
+  <button id="btnModusLive">Live &middot; Sensor im Smartphone</button>
+  <span class="modus-info" id="modusInfo">Aufgezeichnete Daten eines realen Prüfstands werden zyklusweise abgespielt.</span>
+</div>
+
 <footer>
   <button class="primaer" id="btnStart">Start</button>
   <button id="btnExperte" disabled>Experte zuschalten</button>
@@ -123,6 +143,14 @@
   <button id="btnSpiegel" hidden>Spiegeln</button>
   <div class="fortschritt"><i id="balken"></i></div>
   <span class="zaehler" id="zaehler">Zyklus 0 / 120</span>
+</footer>
+
+<footer id="footerLive" hidden>
+  <button class="primaer" id="btnMessen">Messung starten</button>
+  <button id="btnBasis" disabled>Normalzustand lernen (10 s)</button>
+  <button id="btnExperte2" disabled>Experte zuschalten</button>
+  <canvas id="verlauf" width="320" height="42" aria-label="Verlauf der Vibration"></canvas>
+  <span class="zaehler" id="liveStatus">Sensor nicht aktiv</span>
 </footer>
 <div class="hinweis" id="hinweis">
   Die Ampel wird im Browser aus den Sensorwerten berechnet &ndash; mit der Regel aus dem Modell:
@@ -202,6 +230,215 @@ el("btnExperte").onclick = () => {
   box.hidden = !box.hidden;
   el("btnExperte").textContent = box.hidden ? "Experte zuschalten" : "Experte trennen";
 };
+
+// ======================= LIVE-MODUS: Smartphone als Vibrationssensor =======================
+// Das Smartphone ist hier das Smart Product: sein Beschleunigungssensor liefert echte,
+// laufende Messwerte. Bewertet wird nicht absolut, sondern gegen einen gelernten
+// Normalzustand - so wie man eine Maschine im Betrieb einlernt.
+
+const LIVE = {
+  an: false, werte: [], basis: null, verlauf: [],
+  ereignisse: 0, gesamt: 0, bewegung: 0, rateStart: 0, rate: 0, letzterZustand: null
+};
+const FAKTOR_GELB = 2.5;   // 2,5-fache Normalvibration = Warnung
+const FAKTOR_ROT  = 4.5;   // 4,5-fache Normalvibration = kritisch
+
+const LIVE_TEXTE = {
+  gruen: { titel: "Zustand normal", text: "Vibration im gelernten Normalbereich" },
+  gelb:  { titel: "Warnung",        text: "Vibration erhöht - Unwucht möglich" },
+  rot:   { titel: "Kritisch",       text: "Vibration stark erhöht - Anlage prüfen" }
+};
+const LIVE_ANLEITUNG = {
+  gelb: ["Befestigung und Schrauben prüfen", "Rotor auf Unwucht sichten", "Messung in einer Stunde wiederholen"],
+  rot:  ["Anlage abschalten", "Rotor auf Beschädigung prüfen", "Lager und Aufhängung kontrollieren", "Messung dokumentieren"]
+};
+
+function rms(liste) {
+  if (!liste.length) return 0;
+  const mittel = liste.reduce((a, b) => a + b, 0) / liste.length;
+  const summe = liste.reduce((a, b) => a + (b - mittel) * (b - mittel), 0);
+  return Math.sqrt(summe / liste.length);
+}
+
+function verlaufZeichnen() {
+  const c = el("verlauf"), ctx = c.getContext("2d");
+  ctx.clearRect(0, 0, c.width, c.height);
+  if (LIVE.verlauf.length < 2) return;
+  const max = Math.max(...LIVE.verlauf, LIVE.basis ? LIVE.basis * FAKTOR_ROT : 0.1);
+  if (LIVE.basis) {
+    [[FAKTOR_GELB, "#e0a53c"], [FAKTOR_ROT, "#c93c2e"]].forEach(([f, farbe]) => {
+      const y = c.height - (LIVE.basis * f / max) * c.height;
+      ctx.strokeStyle = farbe; ctx.setLineDash([4, 4]); ctx.beginPath();
+      ctx.moveTo(0, y); ctx.lineTo(c.width, y); ctx.stroke(); ctx.setLineDash([]);
+    });
+  }
+  ctx.strokeStyle = "#5fa8d3"; ctx.lineWidth = 2; ctx.beginPath();
+  LIVE.verlauf.forEach((w, k) => {
+    const x = (k / (LIVE.verlauf.length - 1)) * c.width;
+    const y = c.height - (w / max) * c.height;
+    k ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  });
+  ctx.stroke();
+}
+
+function liveBewerten(wert) {
+  el("lRMS").textContent = wert.toFixed(3) + " m/s\u00b2";
+  el("lRate").textContent = LIVE.rate + " Hz";
+
+  if (!LIVE.basis) {
+    el("statusTitel").textContent = "Kalibrierung nötig";
+    el("statusText").textContent = "Normalzustand lernen, dann bewertet das System";
+    el("lFaktor").textContent = "\u2013";
+    return;
+  }
+  const faktor = wert / LIVE.basis;
+  el("lFaktor").textContent = faktor.toFixed(2) + " \u00d7 normal";
+
+  const z = faktor >= FAKTOR_ROT ? "rot" : (faktor >= FAKTOR_GELB ? "gelb" : "gruen");
+  el("lampe").className = "lampe an-" + z;
+  el("statusTitel").textContent = LIVE_TEXTE[z].titel;
+  el("statusText").textContent = LIVE_TEXTE[z].text;
+
+  if (z !== LIVE.letzterZustand) {
+    LIVE.letzterZustand = z;
+    const box = el("anleitungBox");
+    if (z === "gruen") box.hidden = true;
+    else {
+      box.hidden = false;
+      el("anleitungTitel").textContent = z === "rot" ? "Sofortmaßnahmen" : "Empfohlene Schritte";
+      el("schritte").innerHTML = LIVE_ANLEITUNG[z].map(s => "<li>" + s + "</li>").join("");
+    }
+    el("btnExperte2").disabled = (z === "gruen");
+  }
+}
+
+function aufBewegung(e) {
+  const a = e.acceleration && e.acceleration.x !== null ? e.acceleration : e.accelerationIncludingGravity;
+  if (!a) return;
+  const betrag = Math.sqrt((a.x || 0) ** 2 + (a.y || 0) ** 2 + (a.z || 0) ** 2);
+  LIVE.werte.push(betrag);
+  LIVE.ereignisse++; LIVE.gesamt++;
+  if (betrag > 0) LIVE.bewegung++;        // echte Messwerte, nicht nur Nullen
+
+  const jetzt = performance.now();
+  if (jetzt - LIVE.rateStart >= 1000) {
+    LIVE.rate = LIVE.ereignisse;
+    LIVE.ereignisse = 0; LIVE.rateStart = jetzt;
+  }
+  if (LIVE.werte.length >= 20) {               // rund 0,3 s Fenster
+    const wert = rms(LIVE.werte);
+    LIVE.werte = [];
+    LIVE.verlauf.push(wert);
+    if (LIVE.verlauf.length > 120) LIVE.verlauf.shift();
+    if (LIVE.basisSammeln) LIVE.basisProbe.push(wert);
+    liveBewerten(wert);
+    verlaufZeichnen();
+  }
+}
+
+async function messungStarten() {
+  try {
+    if (typeof DeviceMotionEvent !== "undefined" &&
+        typeof DeviceMotionEvent.requestPermission === "function") {
+      const antwort = await DeviceMotionEvent.requestPermission();   // iOS
+      if (antwort !== "granted") throw new Error("Zugriff abgelehnt");
+    }
+    if (typeof DeviceMotionEvent === "undefined") throw new Error("Kein Bewegungssensor");
+
+    window.addEventListener("devicemotion", aufBewegung);
+    LIVE.an = true; LIVE.rateStart = performance.now(); LIVE.ereignisse = 0;
+    el("btnMessen").textContent = "Messung stoppen";
+    el("btnBasis").disabled = false;
+    el("liveStatus").textContent = "Sensor aktiv";
+    el("statusTitel").textContent = "Kalibrierung nötig";
+    el("statusText").textContent = "Normalzustand lernen, dann bewertet das System";
+
+    // Desktop-Browser melden das Ereignis, liefern aber keine echten Werte.
+    // Deshalb nicht auf Ereignisse prüfen, sondern auf brauchbare Messwerte.
+    setTimeout(() => {
+      if (LIVE.an && LIVE.bewegung < 20) {
+        messungStoppen();
+        el("btnBasis").disabled = true;
+        el("liveStatus").textContent = "Keine brauchbaren Sensordaten";
+        el("modusInfo").textContent = "Dieses Gerät liefert keine Bewegungsdaten. " +
+          "Der Live-Modus braucht ein Smartphone oder Tablet über https. Am Laptop bitte den Demo-Modus nutzen.";
+      }
+    }, 2500);
+  } catch (e) {
+    el("liveStatus").textContent = "Sensor nicht verfügbar: " + e.message;
+    el("modusInfo").textContent = "Bewegungssensoren gibt es nur auf Smartphone oder Tablet, " +
+      "und nur über https. Am Laptop bitte den Demo-Modus nutzen.";
+  }
+}
+function messungStoppen() {
+  window.removeEventListener("devicemotion", aufBewegung);
+  LIVE.an = false;
+  el("btnMessen").textContent = "Messung starten";
+  el("liveStatus").textContent = "Sensor gestoppt";
+}
+el("btnMessen").onclick = () => LIVE.an ? messungStoppen() : messungStarten();
+
+el("btnBasis").onclick = () => {
+  LIVE.basisProbe = []; LIVE.basisSammeln = true;
+  el("btnBasis").disabled = true;
+  let rest = 10;
+  el("liveStatus").textContent = "Lerne Normalzustand \u2013 noch " + rest + " s";
+  const uhr = setInterval(() => {
+    rest--;
+    el("liveStatus").textContent = rest > 0
+      ? "Lerne Normalzustand \u2013 noch " + rest + " s" : "Normalzustand gelernt";
+    if (rest <= 0) {
+      clearInterval(uhr);
+      LIVE.basisSammeln = false;
+      const proben = LIVE.basisProbe.filter(w => w > 0);
+      LIVE.basis = proben.length
+        ? proben.reduce((a, b) => a + b, 0) / proben.length
+        : null;
+      el("lBasis").textContent = LIVE.basis ? LIVE.basis.toFixed(3) + " m/s\u00b2" : "nicht gelernt";
+      el("btnBasis").disabled = false;
+      el("btnBasis").textContent = "Neu lernen (10 s)";
+      if (LIVE.basis) {
+        el("lampe").className = "lampe an-gruen";
+        el("statusTitel").textContent = "Zustand normal";
+        el("statusText").textContent = "Normalzustand gelernt - Überwachung läuft";
+        LIVE.letzterZustand = "gruen";
+      } else {
+        el("statusText").textContent = "Keine Messwerte erhalten - Messung prüfen";
+      }
+    }
+  }, 1000);
+};
+
+el("btnExperte2").onclick = () => {
+  const box = el("experteBox");
+  box.hidden = !box.hidden;
+  el("btnExperte2").textContent = box.hidden ? "Experte zuschalten" : "Experte trennen";
+};
+
+// ---- Umschalten zwischen den beiden Modi ----
+function modusSetzen(live) {
+  if (laeuft) stoppen();
+  if (LIVE.an) messungStoppen();
+  el("btnModusDemo").classList.toggle("aktiv", !live);
+  el("btnModusLive").classList.toggle("aktiv", live);
+  el("werteDemo").hidden = live;
+  el("werteLive").hidden = !live;
+  el("footerLive").hidden = !live;
+  document.querySelector("footer").hidden = live;
+  el("anleitungBox").hidden = true;
+  el("lampe").className = "lampe";
+  letzterZustand = null; LIVE.letzterZustand = null;
+  el("statusTitel").textContent = "Bereit";
+  el("statusText").textContent = live ? "Messung starten" : "Auf Start drücken";
+  el("modusInfo").textContent = live
+    ? "Das Smartphone misst die Vibration in Echtzeit. Ersatzaufbau statt echter Anlage."
+    : "Aufgezeichnete Daten eines realen Prüfstands werden zyklusweise abgespielt.";
+  el("geraet").textContent = live
+    ? "Smartphone als Vibrationssensor (Zielgerät: Smart Glasses)"
+    : "Anzeige: Tablet / Laptop (Zielgerät: Smart Glasses)";
+}
+el("btnModusDemo").onclick = () => modusSetzen(false);
+el("btnModusLive").onclick = () => modusSetzen(true);
 
 // ---- Kamera: Auswahl und Wechsel (Tablets starten oft mit der Frontkamera) ----
 let kameras = [], kameraIndex = 0, aktuellerStream = null;
