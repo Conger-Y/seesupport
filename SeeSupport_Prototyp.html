@@ -130,8 +130,21 @@
 </div>
 
 <div class="modus">
-  <button id="btnModusDemo" class="aktiv">Demo &middot; Datensatz</button>
-  <button id="btnModusLive">Live &middot; Sensor im Smartphone</button>
+  <button id="btnRolleDemo" class="aktiv">Demo &middot; Datensatz</button>
+  <button id="btnRolleLokal">Live &middot; dieses Gerat</button>
+  <button id="btnRolleSensor">Sensor &middot; senden</button>
+  <button id="btnRolleAnzeige">Anzeige &middot; empfangen</button>
+</div>
+<div class="modus" id="netzLeiste" hidden>
+  <span class="punkt" id="netzPunkt" style="background:#c93c2e"></span>
+  <span class="modus-info" id="netzStatus">Nicht verbunden</span>
+  <label class="modus-info" for="codeFeld">Code</label>
+  <input id="codeFeld" maxlength="6" placeholder="z.B. 7K2P"
+         style="width:90px;font:inherit;font-size:14px;padding:7px 10px;border-radius:8px;
+                border:1px solid #2b4a6b;background:#0b1a29;color:#f4f6f9;text-transform:uppercase">
+  <button id="btnVerbinden">Verbinden</button>
+</div>
+<div class="modus">
   <span class="modus-info" id="modusInfo">Aufgezeichnete Daten eines realen Prüfstands werden zyklusweise abgespielt.</span>
 </div>
 
@@ -345,12 +358,18 @@ function verarbeite(x, y, z) {
   if (LIVE.werte.length >= 20) {               // rund 0,3 s Fenster
     const wert = rms(LIVE.werte);
     LIVE.werte = [];
-    LIVE.verlauf.push(wert);
-    if (LIVE.verlauf.length > 120) LIVE.verlauf.shift();
-    if (LIVE.basisSammeln) LIVE.basisProbe.push(wert);
-    liveBewerten(wert);
-    verlaufZeichnen();
+    wertAufnehmen(wert);
+    if (MQ.rolle === "sensor") sendeWert(wert);   // als Sensor nur messen und senden
   }
+}
+
+// Ein fertiger Messwert - egal ob vom eigenen Sensor oder uber das Netz empfangen
+function wertAufnehmen(wert) {
+  LIVE.verlauf.push(wert);
+  if (LIVE.verlauf.length > 120) LIVE.verlauf.shift();
+  if (LIVE.basisSammeln) LIVE.basisProbe.push(wert);
+  liveBewerten(wert);
+  verlaufZeichnen();
 }
 
 async function messungStarten() {
@@ -489,8 +508,6 @@ el("btnExperte2").onclick = () => {
 function modusSetzen(live) {
   if (laeuft) stoppen();
   if (LIVE.an) messungStoppen();
-  el("btnModusDemo").classList.toggle("aktiv", !live);
-  el("btnModusLive").classList.toggle("aktiv", live);
   el("werteDemo").hidden = live;
   el("werteLive").hidden = !live;
   el("footerLive").hidden = !live;
@@ -507,8 +524,146 @@ function modusSetzen(live) {
     ? "Smartphone als Vibrationssensor (Zielgerät: Smart Glasses)"
     : "Anzeige: Tablet / Laptop (Zielgerät: Smart Glasses)";
 }
-el("btnModusDemo").onclick = () => modusSetzen(false);
-el("btnModusLive").onclick = () => modusSetzen(true);
+
+// ======================= VERTEILTER BETRIEB UEBER MQTT =======================
+// Das Smartphone haengt als Sensor an der Maschine und publiziert seine Messwerte.
+// Der Laptop ist die Anzeige des Technikers und abonniert sie.
+// MQTT ist der Standard der Industrie-4.0-Kommunikation.
+
+const MQ = { rolle: "lokal", client: null, topic: null, code: null, letzteNachricht: 0 };
+
+const BROKER = [
+  "wss://broker.emqx.io:8084/mqtt",
+  "wss://broker.hivemq.com:8884/mqtt"
+];
+const BIBLIOTHEKEN = [
+  "https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js",
+  "https://unpkg.com/mqtt@4.3.7/dist/mqtt.min.js",
+  "https://cdn.jsdelivr.net/npm/mqtt@4.3.7/dist/mqtt.min.js"
+];
+
+// Laedt die Bibliothek, probiert mehrere Quellen nacheinander
+function bibliothekLaden() {
+  if (window.mqtt) return Promise.resolve(true);
+  return new Promise(fertig => {
+    let n = 0;
+    const naechste = () => {
+      if (n >= BIBLIOTHEKEN.length) return fertig(false);
+      const s = document.createElement("script");
+      s.src = BIBLIOTHEKEN[n++];
+      s.onload = () => fertig(!!window.mqtt);
+      s.onerror = naechste;
+      document.head.appendChild(s);
+    };
+    naechste();
+  });
+}
+
+function netzStatus(text, verbunden) {
+  el("netzStatus").textContent = text;
+  el("netzPunkt").style.background = verbunden ? "#1d9a5f" : "#c93c2e";
+}
+
+async function netzVerbinden(rolle) {
+  const code = (el("codeFeld").value || "").trim().toUpperCase();
+  if (code.length < 4) { netzStatus("Bitte einen Code mit mindestens 4 Zeichen eingeben", false); return; }
+
+  netzStatus("Lade MQTT-Bibliothek ...", false);
+  if (!await bibliothekLaden()) {
+    netzStatus("MQTT-Bibliothek nicht erreichbar - bitte Internetverbindung prüfen", false);
+    return;
+  }
+
+  MQ.code = code;
+  MQ.topic = "seesupport/" + code + "/vibration";
+  if (MQ.client) { try { MQ.client.end(true); } catch (e) {} MQ.client = null; }
+
+  let versuch = 0;
+  const verbinde = () => {
+    const url = BROKER[versuch % BROKER.length];
+    netzStatus("Verbinde mit " + url.split("//")[1].split(":")[0] + " ...", false);
+    const c = window.mqtt.connect(url, {
+      clientId: "see_" + Math.random().toString(16).slice(2, 10),
+      connectTimeout: 6000, reconnectPeriod: 0, clean: true
+    });
+    MQ.client = c;
+
+    c.on("connect", () => {
+      netzStatus("Verbunden - Code " + code, true);
+      if (rolle === "anzeige") {
+        c.subscribe(MQ.topic, err => {
+          netzStatus(err ? "Abo fehlgeschlagen" : "Verbunden - warte auf Sensordaten (Code " + code + ")", !err);
+        });
+      }
+    });
+
+    c.on("message", (t, inhalt) => {
+      try {
+        const d = JSON.parse(inhalt.toString());
+        if (typeof d.rms === "number") {
+          MQ.letzteNachricht = Date.now();
+          LIVE.rate = d.rate || LIVE.rate;
+          el("lRate").textContent = (d.rate || "?") + " Hz";
+          el("btnBasis").disabled = false;      // jetzt kommen Daten: Normalzustand lernbar
+          wertAufnehmen(d.rms);
+          netzStatus("Daten empfangen - Code " + code, true);
+        }
+      } catch (e) {}
+    });
+
+    c.on("error", () => { try { c.end(true); } catch (e) {} });
+    c.on("close", () => {
+      if (versuch < BROKER.length) { versuch++; verbinde(); }
+      else netzStatus("Keine Verbindung - anderes Netz oder mobile Daten versuchen", false);
+    });
+  };
+  verbinde();
+}
+
+function sendeWert(wert) {
+  if (!MQ.client || !MQ.client.connected) return;
+  MQ.client.publish(MQ.topic, JSON.stringify({ rms: Number(wert.toFixed(4)), rate: LIVE.rate, t: Date.now() }));
+}
+
+// Anzeige meldet, wenn der Sensor still wird
+setInterval(() => {
+  if (MQ.rolle === "anzeige" && MQ.letzteNachricht && Date.now() - MQ.letzteNachricht > 4000) {
+    netzStatus("Keine Daten seit 4 s - sendet das Smartphone noch?", false);
+  }
+}, 2000);
+
+// ---- Rollen umschalten ----
+function rolleSetzen(rolle) {
+  MQ.rolle = rolle;
+  const verteilt = (rolle === "sensor" || rolle === "anzeige");
+  modusSetzen(rolle !== "demo");
+  el("netzLeiste").hidden = !verteilt;
+
+  ["btnRolleDemo", "btnRolleLokal", "btnRolleSensor", "btnRolleAnzeige"].forEach(id =>
+    el(id).classList.remove("aktiv"));
+  el({ demo: "btnRolleDemo", lokal: "btnRolleLokal", sensor: "btnRolleSensor", anzeige: "btnRolleAnzeige" }[rolle]).classList.add("aktiv");
+
+  // In der Anzeige-Rolle misst dieses Gerat nicht selbst.
+  // Der Normalzustand gehoert zur Bewertung, also nicht zum Sensor.
+  el("btnMessen").hidden = (rolle === "anzeige");
+  el("btnBasis").hidden = (rolle === "sensor");
+  el("btnVerbinden").textContent = rolle === "sensor" ? "Senden starten" : "Empfang starten";
+
+  if (rolle === "sensor") {
+    el("geraet").textContent = "Smartphone als Sensor an der Maschine";
+    el("modusInfo").textContent = "Dieses Gerat misst und sendet die Werte per MQTT. Die Bewertung macht die Anzeige.";
+    if (!el("codeFeld").value) el("codeFeld").value = Math.random().toString(36).slice(2, 6).toUpperCase();
+  } else if (rolle === "anzeige") {
+    el("geraet").textContent = "Anzeige des Technikers (Zielgerät: Smart Glasses)";
+    el("modusInfo").textContent = "Dieses Gerat empfangt die Sensordaten und bewertet sie - wie die Brille im Einsatz.";
+    el("statusText").textContent = "Auf Empfang warten";
+  }
+}
+el("btnRolleDemo").onclick = () => rolleSetzen("demo");
+el("btnRolleLokal").onclick = () => rolleSetzen("lokal");
+el("btnRolleSensor").onclick = () => rolleSetzen("sensor");
+el("btnRolleAnzeige").onclick = () => rolleSetzen("anzeige");
+el("btnVerbinden").onclick = () => netzVerbinden(MQ.rolle);
 
 // ---- Kamera: Auswahl und Wechsel (Tablets starten oft mit der Frontkamera) ----
 let kameras = [], kameraIndex = 0, aktuellerStream = null;
