@@ -326,8 +326,13 @@ function aufBewegung(e) {
       " | x/y/z: " + (a ? [a.x, a.y, a.z].map(w => (w === null || w === undefined) ? "null" : w.toFixed(2)).join(" / ") : "null") +
       " | brauchbar: " + LIVE.bewegung;
   }
-  if (!a) return;
-  const betrag = Math.sqrt((a.x || 0) ** 2 + (a.y || 0) ** 2 + (a.z || 0) ** 2);
+  if (!a || a.x === null || a.x === undefined) return;
+  verarbeite(a.x, a.y, a.z);
+}
+
+// Gemeinsame Verarbeitung für beide Sensor-Schnittstellen
+function verarbeite(x, y, z) {
+  const betrag = Math.sqrt((x || 0) ** 2 + (y || 0) ** 2 + (z || 0) ** 2);
   LIVE.werte.push(betrag);
   LIVE.ereignisse++; LIVE.gesamt++;
   if (betrag > 0) LIVE.bewegung++;        // echte Messwerte, nicht nur Nullen
@@ -369,16 +374,10 @@ async function messungStarten() {
     el("statusTitel").textContent = "Kalibrierung nötig";
     el("statusText").textContent = "Normalzustand lernen, dann bewertet das System";
 
-    // Desktop-Browser melden das Ereignis, liefern aber keine echten Werte.
-    // Deshalb nicht auf Ereignisse prüfen, sondern auf brauchbare Messwerte.
+    // Chrome auf Android schickt manchmal nur ein leeres Ereignis (x/y/z = null).
+    // Dann auf die neuere Sensor-API umschalten, bevor wir aufgeben.
     setTimeout(() => {
-      if (LIVE.an && LIVE.bewegung < 20) {
-        messungStoppen();
-        el("btnBasis").disabled = true;
-        el("liveStatus").textContent = "Keine brauchbaren Sensordaten";
-        el("modusInfo").textContent = "Dieses Gerät liefert keine Bewegungsdaten. " +
-          "Der Live-Modus braucht ein Smartphone oder Tablet über https. Am Laptop bitte den Demo-Modus nutzen.";
-      }
+      if (LIVE.an && LIVE.bewegung < 20) sensorApiVersuchen();
     }, 2500);
   } catch (e) {
     el("liveStatus").textContent = "Sensor nicht verfügbar: " + e.message;
@@ -386,8 +385,63 @@ async function messungStarten() {
       "und nur über https. Am Laptop bitte den Demo-Modus nutzen.";
   }
 }
+// Zweiter Weg: die neuere Generic Sensor API (Chrome auf Android)
+async function sensorApiVersuchen() {
+  el("diagnose").textContent = "Diagnose - devicemotion liefert nichts, versuche Sensor-API ...";
+  try {
+    if (typeof Accelerometer === "undefined") throw new Error("Accelerometer API nicht vorhanden");
+
+    if (navigator.permissions && navigator.permissions.query) {
+      try {
+        const p = await navigator.permissions.query({ name: "accelerometer" });
+        if (p.state === "denied") throw new Error("Bewegungssensoren im Browser gesperrt");
+      } catch (pe) {
+        if (pe.message.indexOf("gesperrt") >= 0) throw pe;   // echte Sperre melden
+      }
+    }
+
+    const sensor = new Accelerometer({ frequency: 60 });
+    LIVE.sensor = sensor;
+    sensor.addEventListener("reading", () => {
+      LIVE.rohEreignisse = (LIVE.rohEreignisse || 0) + 1;
+      if (LIVE.rohEreignisse % 20 === 1) {
+        el("diagnose").textContent = "Diagnose - Sensor-API aktiv | Messwerte: " + LIVE.rohEreignisse +
+          " | x/y/z: " + [sensor.x, sensor.y, sensor.z].map(w => (w ?? 0).toFixed(2)).join(" / ") +
+          " | brauchbar: " + LIVE.bewegung;
+      }
+      verarbeite(sensor.x, sensor.y, sensor.z);
+    });
+    sensor.addEventListener("error", ev => {
+      const name = (ev.error && ev.error.name) || "Fehler";
+      el("liveStatus").textContent = "Sensor-API: " + name;
+      el("modusInfo").textContent = name === "NotAllowedError"
+        ? "Bewegungssensoren sind in Chrome gesperrt. Adressleiste antippen, dann Berechtigungen, dann Bewegungssensoren erlauben."
+        : "Der Sensor konnte nicht gestartet werden (" + name + ").";
+    });
+    sensor.start();
+    el("liveStatus").textContent = "Sensor aktiv (Sensor-API)";
+
+    setTimeout(() => {
+      if (LIVE.an && LIVE.bewegung < 20) {
+        messungStoppen();
+        el("btnBasis").disabled = true;
+        el("liveStatus").textContent = "Keine brauchbaren Sensordaten";
+        el("modusInfo").textContent = "Bewegungssensoren sind vermutlich gesperrt. In Chrome: Adressleiste antippen, " +
+          "dann Berechtigungen, dann Bewegungssensoren erlauben. Danach Seite neu laden.";
+      }
+    }, 2500);
+  } catch (e) {
+    messungStoppen();
+    el("btnBasis").disabled = true;
+    el("liveStatus").textContent = "Kein Sensor: " + e.message;
+    el("modusInfo").textContent = "In Chrome bitte Bewegungssensoren für diese Seite erlauben " +
+      "(Adressleiste antippen, dann Berechtigungen). Am Laptop den Demo-Modus nutzen.";
+  }
+}
+
 function messungStoppen() {
   window.removeEventListener("devicemotion", aufBewegung);
+  if (LIVE.sensor) { try { LIVE.sensor.stop(); } catch (e) {} LIVE.sensor = null; }
   LIVE.an = false;
   el("btnMessen").textContent = "Messung starten";
   el("liveStatus").textContent = "Sensor gestoppt";
