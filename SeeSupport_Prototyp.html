@@ -112,6 +112,7 @@
         <span>Referenz normal</span><b id="lBasis">nicht gelernt</b>
         <span>Verhältnis</span><b id="lFaktor">&ndash;</b>
         <span>Messrate</span><b id="lRate">&ndash;</b>
+        <span>Datenquelle</span><b id="lQuelle">eigener Sensor</b>
       </div>
     </div>
 
@@ -131,7 +132,7 @@
 
 <div class="modus">
   <button id="btnRolleDemo" class="aktiv">Demo &middot; Datensatz</button>
-  <button id="btnRolleLokal">Live &middot; dieses Gerat</button>
+  <button id="btnRolleLokal">Live &middot; dieses Gerät</button>
   <button id="btnRolleSensor">Sensor &middot; senden</button>
   <button id="btnRolleAnzeige">Anzeige &middot; empfangen</button>
 </div>
@@ -144,6 +145,12 @@
                 border:1px solid #2b4a6b;background:#0b1a29;color:#f4f6f9;text-transform:uppercase">
   <button id="btnVerbinden">Verbinden</button>
 </div>
+<div class="modus" id="kameraLeiste">
+  <button id="btnKamera">Kamera aktivieren</button>
+  <button id="btnWechsel" hidden>Kamera wechseln</button>
+  <button id="btnSpiegel" hidden>Spiegeln</button>
+  <span class="modus-info">Die Kamera ist in jedem Modus verfügbar - sie ist die Sicht des Technikers.</span>
+</div>
 <div class="modus">
   <span class="modus-info" id="modusInfo">Aufgezeichnete Daten eines realen Prüfstands werden zyklusweise abgespielt.</span>
 </div>
@@ -151,9 +158,6 @@
 <footer>
   <button class="primaer" id="btnStart">Start</button>
   <button id="btnExperte" disabled>Experte zuschalten</button>
-  <button id="btnKamera">Kamera aktivieren</button>
-  <button id="btnWechsel" hidden>Kamera wechseln</button>
-  <button id="btnSpiegel" hidden>Spiegeln</button>
   <div class="fortschritt"><i id="balken"></i></div>
   <span class="zaehler" id="zaehler">Zyklus 0 / 120</span>
 </footer>
@@ -605,6 +609,7 @@ async function netzVerbinden(rolle) {
           LIVE.rate = d.rate || LIVE.rate;
           el("lRate").textContent = (d.rate || "?") + " Hz";
           el("btnBasis").disabled = false;      // jetzt kommen Daten: Normalzustand lernbar
+          el("lQuelle").textContent = "Smartphone " + code + " (MQTT)";
           wertAufnehmen(d.rms);
           netzStatus("Daten empfangen - Code " + code, true);
         }
@@ -643,7 +648,7 @@ function rolleSetzen(rolle) {
     el(id).classList.remove("aktiv"));
   el({ demo: "btnRolleDemo", lokal: "btnRolleLokal", sensor: "btnRolleSensor", anzeige: "btnRolleAnzeige" }[rolle]).classList.add("aktiv");
 
-  // In der Anzeige-Rolle misst dieses Gerat nicht selbst.
+  // In der Anzeige-Rolle misst dieses Gerät nicht selbst.
   // Der Normalzustand gehoert zur Bewertung, also nicht zum Sensor.
   el("btnMessen").hidden = (rolle === "anzeige");
   el("btnBasis").hidden = (rolle === "sensor");
@@ -651,12 +656,16 @@ function rolleSetzen(rolle) {
 
   if (rolle === "sensor") {
     el("geraet").textContent = "Smartphone als Sensor an der Maschine";
-    el("modusInfo").textContent = "Dieses Gerat misst und sendet die Werte per MQTT. Die Bewertung macht die Anzeige.";
+    el("modusInfo").textContent = "Dieses Gerät misst und sendet die Werte per MQTT. Die Bewertung macht die Anzeige.";
     if (!el("codeFeld").value) el("codeFeld").value = Math.random().toString(36).slice(2, 6).toUpperCase();
   } else if (rolle === "anzeige") {
     el("geraet").textContent = "Anzeige des Technikers (Zielgerät: Smart Glasses)";
-    el("modusInfo").textContent = "Dieses Gerat empfangt die Sensordaten und bewertet sie - wie die Brille im Einsatz.";
+    el("modusInfo").textContent = "Dieses Gerät empfängt die Sensordaten und bewertet sie - wie die Brille im Einsatz. " +
+      "Kamera einschalten: die Werte liegen dann über dem Kamerabild.";
     el("statusText").textContent = "Auf Empfang warten";
+    el("lQuelle").textContent = "wartet auf Sensor";
+  } else {
+    el("lQuelle").textContent = "eigener Sensor";
   }
 }
 el("btnRolleDemo").onclick = () => rolleSetzen("demo");
