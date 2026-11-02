@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SeeSupport Prototyp</title>
+<style>
+  :root {
+    --navy:#0d1b2a; --blau:#1b3a5f; --hell:#f4f6f9; --grau:#8fa9c4;
+    --gruen:#1d9a5f; --gelb:#e0a53c; --rot:#c93c2e;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:var(--navy); color:var(--hell);
+    font-family:'IBM Plex Sans','Segoe UI',system-ui,sans-serif;
+    min-height:100vh; display:flex; flex-direction:column;
+  }
+  header {
+    padding:14px 20px; display:flex; justify-content:space-between; align-items:center;
+    border-bottom:1px solid #22405f; flex-wrap:wrap; gap:10px;
+  }
+  header h1 { font-size:17px; margin:0; letter-spacing:.5px; font-weight:600; }
+  header .sub { font-size:13px; color:var(--grau); }
+  .buehne { position:relative; flex:1; min-height:62vh; background:#071320; overflow:hidden; }
+  #kamera, #ersatz { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+  #ersatz { display:flex; align-items:center; justify-content:center; }
+  .hud { position:absolute; inset:0; pointer-events:none; padding:18px;
+         display:flex; flex-direction:column; justify-content:space-between; }
+  .karte { background:rgba(8,20,33,.86); border:1px solid #2b4a6b; border-radius:12px;
+           padding:14px 16px; backdrop-filter:blur(3px); pointer-events:auto; }
+  .oben { display:flex; gap:14px; align-items:flex-start; flex-wrap:wrap; }
+  .ampel { display:flex; align-items:center; gap:14px; min-width:250px; }
+  .lampe { width:52px; height:52px; border-radius:50%; background:#24374d; flex:none;
+           box-shadow:inset 0 0 0 3px #16293c; transition:background .35s, box-shadow .35s; }
+  .lampe.an-gruen { background:var(--gruen); box-shadow:0 0 22px rgba(29,154,95,.75); }
+  .lampe.an-gelb  { background:var(--gelb);  box-shadow:0 0 22px rgba(224,165,60,.75); }
+  .lampe.an-rot   { background:var(--rot);   box-shadow:0 0 22px rgba(201,60,46,.8); }
+  .status-titel { font-size:21px; font-weight:600; margin:0 0 2px; }
+  .status-text { font-size:14px; color:var(--grau); margin:0; }
+  .werte { display:grid; grid-template-columns:repeat(2,auto); gap:4px 18px; font-size:14px; }
+  .werte span { color:var(--grau); }
+  .werte b { font-variant-numeric:tabular-nums; }
+  .unten { display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap; }
+  .anleitung { max-width:430px; }
+  .anleitung h3 { margin:0 0 8px; font-size:15px; }
+  .anleitung ol { margin:0; padding-left:20px; font-size:14px; line-height:1.55; }
+  .anleitung li.fertig { color:var(--grau); text-decoration:line-through; }
+  .experte { max-width:300px; }
+  .experte .zeile { display:flex; align-items:center; gap:9px; font-size:14px; margin-top:7px; color:var(--grau); }
+  .punkt { width:9px; height:9px; border-radius:50%; background:var(--gruen); flex:none; }
+  footer { padding:14px 20px; display:flex; gap:12px; align-items:center; flex-wrap:wrap;
+           border-top:1px solid #22405f; }
+  button { font:inherit; font-size:14px; padding:9px 18px; border-radius:8px; cursor:pointer;
+           border:1px solid #2b4a6b; background:#14283d; color:var(--hell); }
+  button:hover { background:#1b3a5f; }
+  button.primaer { background:#e08a3c; border-color:#e08a3c; color:#241304; font-weight:600; }
+  button:disabled { opacity:.45; cursor:default; }
+  .fortschritt { flex:1; min-width:170px; height:7px; background:#16293c; border-radius:4px; overflow:hidden; }
+  .fortschritt i { display:block; height:100%; width:0; background:#e08a3c; transition:width .25s; }
+  .zaehler { font-size:13px; color:var(--grau); font-variant-numeric:tabular-nums; }
+  .hinweis { padding:9px 20px; font-size:13px; background:#14283d; color:var(--grau);
+             border-top:1px solid #22405f; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>SeeSupport &middot; AR-gestützte Instandhaltung</h1>
+    <div class="sub">Prototyp &middot; Hydraulikpumpe HP-204 &middot; Datenquelle: UCI Condition Monitoring (ZeMA)</div>
+  </div>
+  <div class="sub" id="geraet">Anzeige: Tablet / Laptop (Zielgerät: Smart Glasses)</div>
+</header>
+
+<div class="buehne">
+  <video id="kamera" autoplay playsinline muted></video>
+  <div id="ersatz">
+    <svg width="420" height="280" viewBox="0 0 420 280" aria-label="Schematische Hydraulikanlage">
+      <rect x="30" y="80" width="120" height="120" rx="10" fill="#16293c" stroke="#2b4a6b" stroke-width="2"/>
+      <rect x="270" y="80" width="120" height="120" rx="10" fill="#16293c" stroke="#2b4a6b" stroke-width="2"/>
+      <rect x="150" y="128" width="120" height="24" fill="#1b3a5f"/>
+      <circle cx="210" cy="140" r="34" fill="#1b3a5f" stroke="#2b4a6b" stroke-width="2"/>
+      <path d="M210 118 L210 162 M188 140 L232 140" stroke="#8fa9c4" stroke-width="3"/>
+      <text x="210" y="232" fill="#8fa9c4" font-size="15" text-anchor="middle" font-family="sans-serif">Kamera nicht aktiv</text>
+    </svg>
+  </div>
+
+  <div class="hud">
+    <div class="oben">
+      <div class="karte ampel">
+        <div class="lampe" id="lampe"></div>
+        <div>
+          <p class="status-titel" id="statusTitel">Bereit</p>
+          <p class="status-text" id="statusText">Auf Start drücken</p>
+        </div>
+      </div>
+      <div class="karte werte">
+        <span>Kühleffizienz</span><b id="wCE">&ndash;</b>
+        <span>Kühlleistung</span><b id="wCP">&ndash;</b>
+        <span>Temperatur</span><b id="wTS">&ndash;</b>
+        <span>Vibration</span><b id="wVS">&ndash;</b>
+      </div>
+    </div>
+
+    <div class="unten">
+      <div class="karte anleitung" id="anleitungBox" hidden>
+        <h3 id="anleitungTitel">Handlungsanweisung</h3>
+        <ol id="schritte"></ol>
+      </div>
+      <div class="karte experte" id="experteBox" hidden>
+        <h3 style="margin:0;font-size:15px">Remote-Experte</h3>
+        <div class="zeile"><span class="punkt"></span><span id="experteText">M. Weber ist verbunden</span></div>
+        <div class="zeile">Sieht dasselbe Bild &middot; kann einzeichnen</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<footer>
+  <button class="primaer" id="btnStart">Start</button>
+  <button id="btnExperte" disabled>Experte zuschalten</button>
+  <button id="btnKamera">Kamera aktivieren</button>
+  <button id="btnWechsel" hidden>Kamera wechseln</button>
+  <button id="btnSpiegel" hidden>Spiegeln</button>
+  <div class="fortschritt"><i id="balken"></i></div>
+  <span class="zaehler" id="zaehler">Zyklus 0 / 120</span>
+</footer>
+<div class="hinweis" id="hinweis">
+  Die Ampel wird im Browser aus den Sensorwerten berechnet &ndash; mit der Regel aus dem Modell:
+  Kühleffizienz unter 23,6 % = Rot, unter 37,2 % = Gelb, darüber = grün.
+</div>
+
+<script>
+// ---- Echte Messdaten: 120 Zyklen vom Hydraulik-Prüfstand ----
+const STROM = [{"zyklus":1675,"ce":46.99,"cp":2.16,"ts":35.6,"vs":0.55,"wahr":100},{"zyklus":1676,"ce":47.05,"cp":2.16,"ts":35.59,"vs":0.55,"wahr":100},{"zyklus":1677,"ce":47.04,"cp":2.16,"ts":35.57,"vs":0.54,"wahr":100},{"zyklus":1678,"ce":47.01,"cp":2.16,"ts":35.58,"vs":0.55,"wahr":100},{"zyklus":1679,"ce":46.99,"cp":2.16,"ts":35.57,"vs":0.54,"wahr":100},{"zyklus":1680,"ce":47.0,"cp":2.16,"ts":35.58,"vs":0.55,"wahr":100},{"zyklus":1681,"ce":47.17,"cp":2.15,"ts":35.62,"vs":0.56,"wahr":100},{"zyklus":1682,"ce":47.14,"cp":2.15,"ts":35.63,"vs":0.55,"wahr":100},{"zyklus":1683,"ce":47.37,"cp":2.16,"ts":35.64,"vs":0.55,"wahr":100},{"zyklus":1684,"ce":47.23,"cp":2.17,"ts":35.65,"vs":0.55,"wahr":100},{"zyklus":1685,"ce":47.16,"cp":2.17,"ts":35.65,"vs":0.55,"wahr":100},{"zyklus":1686,"ce":46.96,"cp":2.16,"ts":35.67,"vs":0.55,"wahr":100},{"zyklus":1687,"ce":46.91,"cp":2.16,"ts":35.67,"vs":0.55,"wahr":100},{"zyklus":1688,"ce":47.04,"cp":2.17,"ts":35.66,"vs":0.55,"wahr":100},{"zyklus":1689,"ce":47.22,"cp":2.17,"ts":35.66,"vs":0.54,"wahr":100},{"zyklus":1690,"ce":47.26,"cp":2.18,"ts":35.66,"vs":0.55,"wahr":100},{"zyklus":1691,"ce":47.39,"cp":2.18,"ts":35.67,"vs":0.54,"wahr":100},{"zyklus":1692,"ce":47.44,"cp":2.18,"ts":35.67,"vs":0.54,"wahr":100},{"zyklus":1693,"ce":47.31,"cp":2.17,"ts":35.68,"vs":0.55,"wahr":100},{"zyklus":1694,"ce":47.38,"cp":2.18,"ts":35.68,"vs":0.55,"wahr":100},{"zyklus":1695,"ce":47.5,"cp":2.18,"ts":35.69,"vs":0.54,"wahr":100},{"zyklus":1696,"ce":47.49,"cp":2.18,"ts":35.69,"vs":0.54,"wahr":100},{"zyklus":1697,"ce":47.49,"cp":2.18,"ts":35.69,"vs":0.54,"wahr":100},{"zyklus":1698,"ce":47.54,"cp":2.18,"ts":35.71,"vs":0.54,"wahr":100},{"zyklus":1699,"ce":47.84,"cp":2.18,"ts":35.71,"vs":0.54,"wahr":100},{"zyklus":1700,"ce":47.9,"cp":2.19,"ts":35.7,"vs":0.53,"wahr":100},{"zyklus":1701,"ce":47.9,"cp":2.19,"ts":35.7,"vs":0.54,"wahr":100},{"zyklus":1702,"ce":47.56,"cp":2.17,"ts":35.71,"vs":0.54,"wahr":100},{"zyklus":1703,"ce":47.76,"cp":2.19,"ts":35.71,"vs":0.54,"wahr":100},{"zyklus":1704,"ce":47.59,"cp":2.18,"ts":35.71,"vs":0.53,"wahr":100},{"zyklus":1705,"ce":47.25,"cp":2.17,"ts":35.72,"vs":0.54,"wahr":100},{"zyklus":1706,"ce":47.89,"cp":2.19,"ts":35.72,"vs":0.53,"wahr":100},{"zyklus":1707,"ce":47.9,"cp":2.19,"ts":35.74,"vs":0.53,"wahr":100},{"zyklus":1708,"ce":47.56,"cp":2.18,"ts":35.74,"vs":0.53,"wahr":100},{"zyklus":1709,"ce":47.24,"cp":2.16,"ts":35.74,"vs":0.54,"wahr":100},{"zyklus":1710,"ce":47.13,"cp":2.15,"ts":35.74,"vs":0.53,"wahr":100},{"zyklus":1711,"ce":47.8,"cp":2.19,"ts":35.75,"vs":0.54,"wahr":100},{"zyklus":1712,"ce":47.8,"cp":2.19,"ts":35.75,"vs":0.54,"wahr":100},{"zyklus":1713,"ce":47.31,"cp":2.16,"ts":35.76,"vs":0.54,"wahr":100},{"zyklus":1714,"ce":47.36,"cp":2.17,"ts":35.78,"vs":0.54,"wahr":100},{"zyklus":943,"ce":26.69,"cp":1.71,"ts":46.17,"vs":0.61,"wahr":20},{"zyklus":944,"ce":26.68,"cp":1.7,"ts":46.11,"vs":0.62,"wahr":20},{"zyklus":945,"ce":26.69,"cp":1.69,"ts":46.08,"vs":0.62,"wahr":20},{"zyklus":946,"ce":26.68,"cp":1.69,"ts":46.07,"vs":0.62,"wahr":20},{"zyklus":947,"ce":26.75,"cp":1.7,"ts":46.05,"vs":0.62,"wahr":20},{"zyklus":948,"ce":26.77,"cp":1.69,"ts":46.03,"vs":0.62,"wahr":20},{"zyklus":949,"ce":26.85,"cp":1.7,"ts":46.02,"vs":0.62,"wahr":20},{"zyklus":950,"ce":27.13,"cp":1.72,"ts":46.0,"vs":0.62,"wahr":20},{"zyklus":951,"ce":26.82,"cp":1.7,"ts":46.0,"vs":0.63,"wahr":20},{"zyklus":952,"ce":26.63,"cp":1.7,"ts":46.0,"vs":0.62,"wahr":20},{"zyklus":953,"ce":26.54,"cp":1.7,"ts":45.99,"vs":0.63,"wahr":20},{"zyklus":954,"ce":26.64,"cp":1.71,"ts":45.99,"vs":0.63,"wahr":20},{"zyklus":955,"ce":26.57,"cp":1.71,"ts":45.96,"vs":0.63,"wahr":20},{"zyklus":956,"ce":26.37,"cp":1.7,"ts":45.95,"vs":0.63,"wahr":20},{"zyklus":957,"ce":26.43,"cp":1.7,"ts":45.93,"vs":0.63,"wahr":20},{"zyklus":958,"ce":26.63,"cp":1.7,"ts":45.94,"vs":0.63,"wahr":20},{"zyklus":959,"ce":26.79,"cp":1.71,"ts":45.95,"vs":0.63,"wahr":20},{"zyklus":960,"ce":26.83,"cp":1.7,"ts":45.97,"vs":0.63,"wahr":20},{"zyklus":961,"ce":26.87,"cp":1.7,"ts":45.98,"vs":0.63,"wahr":20},{"zyklus":962,"ce":26.9,"cp":1.71,"ts":45.98,"vs":0.63,"wahr":20},{"zyklus":963,"ce":26.87,"cp":1.71,"ts":45.98,"vs":0.63,"wahr":20},{"zyklus":964,"ce":26.78,"cp":1.7,"ts":45.99,"vs":0.63,"wahr":20},{"zyklus":965,"ce":26.99,"cp":1.71,"ts":46.01,"vs":0.62,"wahr":20},{"zyklus":966,"ce":27.27,"cp":1.72,"ts":46.01,"vs":0.63,"wahr":20},{"zyklus":967,"ce":27.28,"cp":1.71,"ts":46.01,"vs":0.63,"wahr":20},{"zyklus":968,"ce":27.06,"cp":1.7,"ts":46.01,"vs":0.63,"wahr":20},{"zyklus":969,"ce":26.97,"cp":1.7,"ts":46.04,"vs":0.63,"wahr":20},{"zyklus":970,"ce":27.26,"cp":1.72,"ts":46.03,"vs":0.63,"wahr":20},{"zyklus":971,"ce":27.27,"cp":1.71,"ts":46.01,"vs":0.63,"wahr":20},{"zyklus":972,"ce":27.24,"cp":1.72,"ts":46.01,"vs":0.62,"wahr":20},{"zyklus":973,"ce":27.09,"cp":1.71,"ts":46.0,"vs":0.63,"wahr":20},{"zyklus":974,"ce":27.11,"cp":1.71,"ts":46.0,"vs":0.63,"wahr":20},{"zyklus":975,"ce":27.13,"cp":1.71,"ts":46.01,"vs":0.63,"wahr":20},{"zyklus":976,"ce":27.16,"cp":1.71,"ts":46.01,"vs":0.62,"wahr":20},{"zyklus":977,"ce":27.12,"cp":1.71,"ts":46.0,"vs":0.62,"wahr":20},{"zyklus":978,"ce":26.98,"cp":1.71,"ts":46.0,"vs":0.63,"wahr":20},{"zyklus":979,"ce":27.06,"cp":1.71,"ts":45.98,"vs":0.63,"wahr":20},{"zyklus":980,"ce":27.07,"cp":1.71,"ts":45.98,"vs":0.62,"wahr":20},{"zyklus":981,"ce":27.23,"cp":1.71,"ts":45.98,"vs":0.62,"wahr":20},{"zyklus":982,"ce":27.08,"cp":1.71,"ts":45.96,"vs":0.62,"wahr":20},{"zyklus":211,"ce":19.97,"cp":1.54,"ts":54.14,"vs":0.74,"wahr":3},{"zyklus":212,"ce":19.98,"cp":1.54,"ts":54.2,"vs":0.81,"wahr":3},{"zyklus":213,"ce":19.66,"cp":1.52,"ts":54.16,"vs":0.71,"wahr":3},{"zyklus":214,"ce":20.09,"cp":1.55,"ts":54.12,"vs":0.73,"wahr":3},{"zyklus":215,"ce":19.99,"cp":1.54,"ts":54.16,"vs":0.74,"wahr":3},{"zyklus":216,"ce":19.85,"cp":1.53,"ts":54.27,"vs":0.68,"wahr":3},{"zyklus":217,"ce":19.93,"cp":1.54,"ts":54.23,"vs":0.66,"wahr":3},{"zyklus":218,"ce":19.87,"cp":1.53,"ts":54.21,"vs":0.66,"wahr":3},{"zyklus":219,"ce":19.7,"cp":1.52,"ts":54.19,"vs":0.66,"wahr":3},{"zyklus":220,"ce":20.05,"cp":1.54,"ts":54.19,"vs":0.66,"wahr":3},{"zyklus":221,"ce":19.96,"cp":1.53,"ts":54.19,"vs":0.66,"wahr":3},{"zyklus":222,"ce":19.92,"cp":1.53,"ts":54.17,"vs":0.66,"wahr":3},{"zyklus":223,"ce":19.74,"cp":1.51,"ts":54.21,"vs":0.66,"wahr":3},{"zyklus":224,"ce":19.83,"cp":1.52,"ts":54.19,"vs":0.66,"wahr":3},{"zyklus":225,"ce":19.91,"cp":1.52,"ts":54.18,"vs":0.65,"wahr":3},{"zyklus":226,"ce":20.03,"cp":1.53,"ts":54.2,"vs":0.66,"wahr":3},{"zyklus":227,"ce":19.65,"cp":1.5,"ts":54.21,"vs":0.67,"wahr":3},{"zyklus":228,"ce":19.95,"cp":1.53,"ts":54.21,"vs":0.66,"wahr":3},{"zyklus":229,"ce":19.99,"cp":1.53,"ts":54.19,"vs":0.66,"wahr":3},{"zyklus":230,"ce":19.9,"cp":1.53,"ts":54.2,"vs":0.66,"wahr":3},{"zyklus":231,"ce":19.97,"cp":1.53,"ts":54.18,"vs":0.66,"wahr":3},{"zyklus":232,"ce":20.23,"cp":1.55,"ts":54.18,"vs":0.66,"wahr":3},{"zyklus":233,"ce":20.08,"cp":1.54,"ts":54.22,"vs":0.66,"wahr":3},{"zyklus":234,"ce":20.03,"cp":1.54,"ts":54.22,"vs":0.65,"wahr":3},{"zyklus":235,"ce":20.09,"cp":1.54,"ts":54.21,"vs":0.66,"wahr":3},{"zyklus":236,"ce":20.24,"cp":1.55,"ts":54.2,"vs":0.65,"wahr":3},{"zyklus":237,"ce":20.21,"cp":1.55,"ts":54.23,"vs":0.66,"wahr":3},{"zyklus":238,"ce":19.97,"cp":1.53,"ts":54.27,"vs":0.66,"wahr":3},{"zyklus":239,"ce":19.94,"cp":1.53,"ts":54.24,"vs":0.66,"wahr":3},{"zyklus":240,"ce":19.88,"cp":1.53,"ts":54.24,"vs":0.65,"wahr":3},{"zyklus":241,"ce":19.79,"cp":1.51,"ts":54.26,"vs":0.66,"wahr":3},{"zyklus":242,"ce":19.98,"cp":1.52,"ts":54.28,"vs":0.66,"wahr":3},{"zyklus":243,"ce":20.18,"cp":1.54,"ts":54.3,"vs":0.66,"wahr":3},{"zyklus":244,"ce":20.12,"cp":1.54,"ts":54.3,"vs":0.66,"wahr":3},{"zyklus":245,"ce":20.12,"cp":1.54,"ts":54.31,"vs":0.66,"wahr":3},{"zyklus":246,"ce":20.16,"cp":1.54,"ts":54.3,"vs":0.66,"wahr":3},{"zyklus":247,"ce":19.9,"cp":1.53,"ts":54.27,"vs":0.74,"wahr":3},{"zyklus":248,"ce":19.87,"cp":1.53,"ts":54.38,"vs":0.75,"wahr":3},{"zyklus":249,"ce":19.76,"cp":1.52,"ts":54.39,"vs":0.66,"wahr":3},{"zyklus":250,"ce":20.01,"cp":1.54,"ts":54.42,"vs":0.66,"wahr":3}];
+
+// ---- Die Regel aus dem Entscheidungsbaum (DPM-Projekt) ----
+const GRENZE_ROT = 23.6, GRENZE_GELB = 37.2;
+function zustandBestimmen(ce) {
+  if (ce < GRENZE_ROT)  return "rot";
+  if (ce < GRENZE_GELB) return "gelb";
+  return "gruen";
+}
+
+const TEXTE = {
+  gruen: { titel: "Zustand normal", text: "Kühler arbeitet im Normalbereich" },
+  gelb:  { titel: "Warnung",        text: "Kühlleistung lässt nach - Wartung einplanen" },
+  rot:   { titel: "Kritisch",       text: "Kühler nahe Totalausfall - Anlage stoppen" }
+};
+const ANLEITUNG = {
+  gelb: ["Kühlmittelstand prüfen", "Filter auf Verschmutzung sichten", "Wartung für nächste Schicht einplanen"],
+  rot:  ["Anlage sofort stoppen", "Kühlkreislauf druckfrei machen", "Wärmetauscher ausbauen und prüfen", "Einsatz dokumentieren"]
+};
+
+const el = id => document.getElementById(id);
+let i = 0, timer = null, laeuft = false, letzterZustand = null;
+
+el("zaehler").textContent = "Zyklus 0 / " + STROM.length;
+
+function zeichne(d) {
+  el("wCE").textContent = d.ce.toFixed(1) + " %";
+  el("wCP").textContent = d.cp.toFixed(2) + " kW";
+  el("wTS").textContent = d.ts.toFixed(1) + " \u00b0C";
+  el("wVS").textContent = d.vs.toFixed(2) + " mm/s";
+
+  const z = zustandBestimmen(d.ce);
+  el("lampe").className = "lampe an-" + z;
+  el("statusTitel").textContent = TEXTE[z].titel;
+  el("statusText").textContent = TEXTE[z].text;
+
+  if (z !== letzterZustand) {
+    letzterZustand = z;
+    const box = el("anleitungBox");
+    if (z === "gruen") { box.hidden = true; }
+    else {
+      box.hidden = false;
+      el("anleitungTitel").textContent = z === "rot" ? "Sofortmaßnahmen" : "Empfohlene Schritte";
+      el("schritte").innerHTML = ANLEITUNG[z].map(s => "<li>" + s + "</li>").join("");
+    }
+    el("btnExperte").disabled = (z === "gruen");
+  }
+
+  el("balken").style.width = ((i / STROM.length) * 100) + "%";
+  el("zaehler").textContent = "Zyklus " + i + " / " + STROM.length;
+}
+
+function schritt() {
+  if (i >= STROM.length) { stoppen(); el("btnStart").textContent = "Neu starten"; i = 0; return; }
+  zeichne(STROM[i]); i++;
+}
+function starten() {
+  if (i >= STROM.length) i = 0;
+  laeuft = true; el("btnStart").textContent = "Pause";
+  timer = setInterval(schritt, 260);
+}
+function stoppen() {
+  laeuft = false; clearInterval(timer); el("btnStart").textContent = "Weiter";
+}
+el("btnStart").onclick = () => laeuft ? stoppen() : starten();
+
+el("btnExperte").onclick = () => {
+  const box = el("experteBox");
+  box.hidden = !box.hidden;
+  el("btnExperte").textContent = box.hidden ? "Experte zuschalten" : "Experte trennen";
+};
+
+// ---- Kamera: Auswahl und Wechsel (Tablets starten oft mit der Frontkamera) ----
+let kameras = [], kameraIndex = 0, aktuellerStream = null;
+
+async function kameraStarten(index) {
+  if (aktuellerStream) aktuellerStream.getTracks().forEach(t => t.stop());
+  const wunsch = kameras.length
+    ? { deviceId: { exact: kameras[index].deviceId } }
+    : { facingMode: { ideal: "environment" } };
+  aktuellerStream = await navigator.mediaDevices.getUserMedia({ video: wunsch });
+  el("kamera").srcObject = aktuellerStream;
+  el("ersatz").style.display = "none";
+
+  const name = kameras[index] && kameras[index].label ? kameras[index].label : "Kamera";
+  el("hinweis").textContent = "Aktive Kamera: " + name +
+    (kameras.length > 1 ? " \u00b7 " + (index + 1) + " von " + kameras.length +
+     " \u2013 mit \u201eKamera wechseln\u201c zur R\u00fcckkamera" : "");
+}
+
+el("btnKamera").onclick = async () => {
+  try {
+    // Erst Erlaubnis holen, danach liefert enumerateDevices die Namen
+    const start = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } } });
+    start.getTracks().forEach(t => t.stop());
+
+    const alle = await navigator.mediaDevices.enumerateDevices();
+    kameras = alle.filter(g => g.kind === "videoinput");
+
+    // Rueckkamera bevorzugen, falls erkennbar
+    const hinten = kameras.findIndex(k => /back|rear|environment|r\u00fcck/i.test(k.label));
+    kameraIndex = hinten >= 0 ? hinten : 0;
+
+    await kameraStarten(kameraIndex);
+    el("btnKamera").disabled = true;
+    el("btnKamera").textContent = "Kamera aktiv";
+    el("btnSpiegel").hidden = false;
+    if (kameras.length > 1) el("btnWechsel").hidden = false;
+  } catch (e) {
+    el("hinweis").textContent = "Kamera nicht verfügbar (" + e.name +
+      "). Der Prototyp läuft mit schematischer Ansicht weiter. Hinweis: Die Kamera benötigt https oder localhost.";
+  }
+};
+
+el("btnWechsel").onclick = async () => {
+  kameraIndex = (kameraIndex + 1) % kameras.length;
+  try { await kameraStarten(kameraIndex); }
+  catch (e) { el("hinweis").textContent = "Wechsel fehlgeschlagen (" + e.name + ")."; }
+};
+
+el("btnSpiegel").onclick = () => {
+  const v = el("kamera");
+  v.dataset.gespiegelt = v.dataset.gespiegelt === "1" ? "0" : "1";
+  v.style.transform = v.dataset.gespiegelt === "1" ? "scaleX(-1)" : "none";
+};
+</script>
+</body>
+</html>
